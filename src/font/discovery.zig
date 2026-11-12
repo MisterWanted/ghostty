@@ -314,31 +314,43 @@ pub const Fontconfig = struct {
         }
 
         pub fn next(self: *DiscoverIterator) fontconfig.Error!?DeferredFace {
-            if (self.i >= self.fonts.len) return null;
+            while (self.i < self.fonts.len) : (self.i += 1) {
+                // Get the copied pattern from our fontset that has the
+                // attributes configured for rendering.
+                const font_pattern = try self.config.fontRenderPrepare(
+                    self.pattern,
+                    self.fonts[self.i],
+                );
+                errdefer font_pattern.destroy();
 
-            // Get the copied pattern from our fontset that has the
-            // attributes configured for rendering.
-            const font_pattern = try self.config.fontRenderPrepare(
-                self.pattern,
-                self.fonts[self.i],
-            );
-            errdefer font_pattern.destroy();
+                // Some fonts in the fontconfig set have no charset and/or
+                // lang attributes (e.g. web-only icon fonts like Debian's
+                // fonts-material-design-icons-iconfont, a .woff in
+                // /usr/share/fonts). They can never satisfy a lookup, so
+                // skip them rather than fail the entire discovery.
+                const charset = font_pattern.get(.charset, 0) catch {
+                    font_pattern.destroy();
+                    continue;
+                };
+                const langset = font_pattern.get(.lang, 0) catch {
+                    font_pattern.destroy();
+                    continue;
+                };
 
-            // Increment after we return
-            defer self.i += 1;
-
-            return DeferredFace{
-                .fc = .{
-                    .pattern = font_pattern,
-                    .charset = (try font_pattern.get(.charset, 0)).char_set,
-                    // NOTE: In vast majority of situations this contains a
-                    // `*const LangSet`, but Fontconfig falls back to a simple string
-                    // ("en") if the pattern fails to match any language. Bad bad bad
-                    // bad API design. But we must handle it gracefully here.
-                    .langset = try font_pattern.get(.lang, 0),
-                    .variations = self.variations,
-                },
-            };
+                return DeferredFace{
+                    .fc = .{
+                        .pattern = font_pattern,
+                        .charset = charset.char_set,
+                        // NOTE: In vast majority of situations this contains a
+                        // `*const LangSet`, but Fontconfig falls back to a simple string
+                        // ("en") if the pattern fails to match any language. Bad bad bad
+                        // bad API design. But we must handle it gracefully here.
+                        .langset = langset,
+                        .variations = self.variations,
+                    },
+                };
+            }
+            return null;
         }
     };
 };
